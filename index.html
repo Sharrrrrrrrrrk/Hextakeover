@@ -125,7 +125,7 @@ function updateStatus(){
     const turnColor = currentPlayer===1?"#00e5ff":"#ff5252";
     canvas.style.boxShadow = currentPlayer===1?"0 0 25px #00e5ff":"0 0 25px #ff5252";
     statusDiv.innerHTML=`<span style="color:#00e5ff">藍: ${blue}</span> | <span style="color:#ff5252"> 紅: ${red}</span><br>
-        当前行动: <span style="color:${turnColor}">${currentPlayer===1?'藍色':'红色'}</span>`;
+        目前回合: <span style="color:${turnColor}">${currentPlayer===1?'藍色':'红色'}</span>`;
 }
 
 function checkGameOver(){
