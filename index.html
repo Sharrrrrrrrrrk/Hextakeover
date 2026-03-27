@@ -2,244 +2,262 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>Hex Takeover Pro - 多人版</title>
+<title>Hex Takeover Pro</title>
 <style>
-body { margin:0; background:#1a1a1a; color:white; font-family:'Segoe UI'; display:flex; height:100vh;}
-#sidebar { width:260px; background:#333; padding:20px; display:flex; flex-direction:column; gap:12px; overflow-y:auto;}
-#main { flex:1; display:flex; flex-direction:column; align-items:center;}
-canvas { background:#252525; border-radius:15px; max-width:95%; max-height:60%; cursor:pointer; margin-bottom:10px;}
-button { padding:6px; border:none; border-radius:10px; background:#00bcd4; color:white; cursor:pointer;}
-.legend div{margin:3px 0;}
-#chatBox { flex:1; background:#222; padding:5px; overflow-y:auto; border-radius:8px; margin-top:10px; }
-#chatInput { display:flex; gap:5px; margin-top:5px; }
-#chatInput input { flex:1; padding:5px; border-radius:5px; border:none; }
+body { margin:0; background:#1a1a1a; color:white; font-family:'Segoe UI',sans-serif; display:flex; height:100vh;}
+#sidebar { width:250px; background:#333; padding:20px; display:flex; flex-direction:column; gap:15px; box-shadow:2px 0 15px rgba(0,0,0,0.3);}
+#main { flex:1; display:flex; justify-content:center; align-items:center; position:relative;}
+canvas { max-width:95%; max-height:95%; border-radius:15px; background:#252525; cursor:pointer;}
+button { padding:6px 15px; cursor:pointer; background:#00bcd4; color:white; border:none; border-radius:15px; font-weight:bold; transition:0.2s;}
+button:hover { background:#00e5ff; transform:scale(1.05);}
+input[type=range], input[type=checkbox]{ cursor:pointer;}
+.status { font-size:22px; margin:10px; height:50px;}
+.legend { margin-top:10px; font-size:14px; color:#888;}
+.dot { height:10px; width:10px; border-radius:50%; display:inline-block; margin:0 5px;}
 </style>
 </head>
 <body>
-
 <div id="sidebar">
-<label>玩家數量: <span id="playerCountValue">2</span></label>
-<input type="range" id="playerCountRange" min="2" max="6" value="2">
-
-<label>棋盤大小: <span id="sizeValue">3</span></label>
-<input type="range" id="sizeRange" min="2" max="8" value="3">
-
-<label>障礙物: <span id="obsValue">2</span></label>
-<input type="range" id="obsRange" min="0" max="15" value="2">
-
-<button onclick="initGameLocal()">重置(本地)</button>
-<div id="status"></div>
-<div class="legend" id="legend"></div>
+    <label>棋盤大小: <span id="sizeValue">3</span></label>
+    <input type="range" id="sizeRange" min="2" max="10" value="3">
+    <label>障礙物數量: <span id="obstacleValue">3</span></label>
+    <input type="range" id="obstacleRange" min="0" max="20" value="3">
+    <button id="resetBtn">重置棋局</button>
+    <button id="undoBtn">悔棋</button>
+    <label><input type="checkbox" id="aiToggle"> AI 開啟</label>
+    <div id="status"></div>
+    <div class="legend">
+        <span class="dot" style="background: rgba(0, 255, 0, 0.5);"></span> 複製
+        <span class="dot" style="background: rgba(255, 255, 0, 0.5);"></span> 跳躍
+        <span class="dot" style="background: rgba(128,128,128,0.8);"></span> 障礙物
+    </div>
 </div>
-
 <div id="main">
-<canvas id="c" width="800" height="600"></canvas>
-
-<div id="chatBox"></div>
-<div id="chatInput">
-<input id="name" placeholder="名字" />
-<input id="msg" placeholder="輸入訊息..." />
-<button onclick="sendMessage()">送出</button>
-</div>
+    <canvas id="gameCanvas" width="800" height="800"></canvas>
 </div>
 
-<!-- Firebase -->
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, push, onValue, set } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-
-// 🔴 替換成你的 Firebase config
-const firebaseConfig = {
-  apiKey: "AIzaSyCo8StZeM0NRGi9XoTfmTCe_VovLt8nGjw",
-  authDomain: "my-game-d7829.firebaseapp.com",
-  databaseURL: "https://my-game-d7829-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "my-game-d7829",
-  storageBucket: "my-game-d7829.firebasestorage.app",
-  messagingSenderId: "1037507538095",
-  appId: "1:1037507538095:web:622371a6f117d60e6bb85a"
-};
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
-
-// ===== 聊天功能 =====
-const messagesRef = ref(db, "messages");
-onValue(messagesRef, snapshot => {
-    const data = snapshot.val();
-    const box = document.getElementById("chatBox");
-    box.innerHTML = "";
-    if(!data) return;
-    Object.values(data).forEach(m => {
-        box.innerHTML += `<div><b>${m.name}:</b> ${m.text}</div>`;
-    });
-    box.scrollTop = box.scrollHeight;
-});
-
-function sendMessage() {
-    const name = document.getElementById("name").value || "匿名";
-    const text = document.getElementById("msg").value;
-    if(!text) return;
-    push(messagesRef, { name, text });
-    document.getElementById("msg").value = "";
-}
-
-// ===== 遊戲核心 =====
-const canvas = document.getElementById('c');
+<script>
+const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-const playerColors = ["#00e5ff","#ff5252","#4caf50","#ffeb3b","#9c27b0","#ff9800"];
-let players=[], currentIndex=0;
-let grid=[], hexSize, history=[];
-let selected=null, hovered=null;
-let gameActive=true, radius=3;
-
+const statusDiv = document.getElementById('status');
 const sizeRange = document.getElementById('sizeRange');
-const obsRange = document.getElementById('obsRange');
-const playerRange = document.getElementById('playerCountRange');
-const status = document.getElementById('status');
-const legend = document.getElementById('legend');
+const sizeValue = document.getElementById('sizeValue');
+const obstacleRange = document.getElementById('obstacleRange');
+const obstacleValue = document.getElementById('obstacleValue');
+const resetBtn = document.getElementById('resetBtn');
+const aiToggle = document.getElementById('aiToggle');
 
-sizeRange.oninput=()=>sizeValue.innerText=sizeRange.value;
-obsRange.oninput=()=>obsValue.innerText=obsRange.value;
-playerRange.oninput=()=>playerCountValue.innerText=playerRange.value;
+let grid = [], hexSize, selectedHex=null, hoveredHex=null, currentPlayer=1, gameActive=true, boardRadius=3, history=[];
 
-function dist(a,b){ return (Math.abs(a.q-b.q)+Math.abs(a.q+a.r-b.q-b.r)+Math.abs(a.r-b.r))/2; }
-function getHex(q,r){ return grid.find(h=>h.q===q && h.r===r); }
-function getPlayer(){ return players[currentIndex]; }
+sizeRange.oninput = ()=>{ sizeValue.innerText = sizeRange.value; }
+obstacleRange.oninput = ()=>{ obstacleValue.innerText = obstacleRange.value; }
 
-// ===== 初始化本地遊戲 (玩家可用) =====
-function initGameLocal(){
-    radius = +sizeRange.value;
-    players = Array.from({length:+playerRange.value},(_,i)=>i+1);
-    currentIndex=0;
-    grid=[]; history=[]; selected=null; gameActive=true;
+function saveHistory(){
+    history.push({ grid:grid.map(h=>({...h})), currentPlayer });
+}
 
-    const size = Math.min(
-        (canvas.width-100)/(3*radius+1.5),
-        (canvas.height-100)/(Math.sqrt(3)*(2*radius+1))
-    );
-    hexSize=size;
+function undoMove(){
+    if(history.length===0) return;
+    // AI 模式悔棋兩步
+    if(aiToggle.checked && history.length>=2){
+        history.pop();
+        const last = history.pop();
+        grid = last.grid.map(h=>({...h}));
+        currentPlayer = last.currentPlayer;
+    } else {
+        const last = history.pop();
+        grid = last.grid.map(h=>({...h}));
+        currentPlayer = last.currentPlayer;
+    }
+    draw();
+    updateStatus();
+}
 
-    for(let q=-radius;q<=radius;q++){
-        for(let r=Math.max(-radius,-q-radius);r<=Math.min(radius,-q+radius);r++){
-            const x=canvas.width/2+hexSize*1.5*q;
-            const y=canvas.height/2+hexSize*(Math.sqrt(3)/2*q+Math.sqrt(3)*r);
-            grid.push({q,r,x,y,owner:0,type:'normal',scale:1});
+function setOwner(q,r,player){ const hex = grid.find(h=>h.q===q&&h.r===r); if(hex) hex.owner=player; }
+
+function getHexPos(q,r){ return { x: canvas.width/2 + hexSize*1.5*q, y: canvas.height/2 + hexSize*(Math.sqrt(3)/2*q + Math.sqrt(3)*r) }; }
+
+function getDistance(h1,h2){ return (Math.abs(h1.q-h2.q)+Math.abs(h1.q+h1.r-h2.q-h2.r)+Math.abs(h1.r-h2.r))/2; }
+
+function getNearestHex(mx,my){ let minDist=Infinity, nearest=null; grid.forEach(h=>{ let d=Math.hypot(h.x-mx,h.y-my); if(d<minDist){ minDist=d; nearest=h; } }); return minDist<hexSize*0.8 ? nearest : null; }
+
+function generateObstacles(count){
+    let emptyHexes = grid.filter(h => h.type === 'normal' && h.owner === 0);
+    for(let i=0;i<count;i++){
+        if(emptyHexes.length===0) break;
+        const idx=Math.floor(Math.random()*emptyHexes.length);
+        emptyHexes[idx].type='obstacle';
+        emptyHexes[idx].owner=0;
+        emptyHexes.splice(idx,1);
+    }
+}
+
+function initGame(){
+    boardRadius = parseInt(sizeRange.value);
+    grid=[]; gameActive=true; currentPlayer=1; selectedHex=null; hoveredHex=null; history=[];
+    const padding=50;
+    const availW = canvas.width - padding*2;
+    const availH = canvas.height - padding*2;
+    const sizeByW = availW / (3*boardRadius+1.5);
+    const sizeByH = availH / (Math.sqrt(3)*(2*boardRadius+1));
+    hexSize = Math.min(sizeByW,sizeByH);
+
+    for(let q=-boardRadius;q<=boardRadius;q++){
+        for(let r=Math.max(-boardRadius,-q-boardRadius); r<=Math.min(boardRadius,-q+boardRadius); r++){
+            const pos=getHexPos(q,r);
+            grid.push({ q,r,x:pos.x,y:pos.y, owner:0, scale:1, ripple:0, type:'normal' });
         }
     }
+    // 初始棋子
+    setOwner(0,-boardRadius,1); grid.find(h=>h.q===0&&h.r===-boardRadius).type='normal';
+    setOwner(0,boardRadius,2); grid.find(h=>h.q===0&&h.r===boardRadius).type='normal';
+    setOwner(boardRadius,-boardRadius,2); grid.find(h=>h.q===boardRadius&&h.r===-boardRadius).type='normal';
+    setOwner(-boardRadius,boardRadius,1); grid.find(h=>h.q===-boardRadius&&h.r===boardRadius).type='normal';
 
-    const starts=[[0,-radius],[radius,-radius],[radius,0],[0,radius],[-radius,radius],[-radius,0]];
-    players.forEach((p,i)=>{ let h=getHex(...starts[i]); if(h){ h.owner=p; h.type='spawn'; } });
+    generateObstacles(parseInt(obstacleRange.value));
 
-    generateObstacles(+obsRange.value);
-    saveStateToFirebase();
-    updateUI();
+    updateStatus();
 }
 
-// ===== 產生障礙 =====
-function generateObstacles(n){
-    let c = grid.filter(h=>h.type==='normal' && !grid.some(s=>s.type==='spawn' && dist(s,h)<=1));
-    for(let i=0;i<n;i++){
-        if(c.length===0) break;
-        let idx=Math.floor(Math.random()*c.length);
-        c[idx].type='obstacle';
-        c.splice(idx,1);
+function updateStatus(){
+    const blue = grid.filter(h=>h.owner===1).length;
+    const red = grid.filter(h=>h.owner===2).length;
+    const turnColor = currentPlayer===1?"#00e5ff":"#ff5252";
+    canvas.style.boxShadow = currentPlayer===1?"0 0 25px #00e5ff":"0 0 25px #ff5252";
+    statusDiv.innerHTML=`<span style="color:#00e5ff">藍: ${blue}</span> | <span style="color:#ff5252"> 紅: ${red}</span><br>
+        当前行动: <span style="color:${turnColor}">${currentPlayer===1?'藍色':'红色'}</span>`;
+}
+
+function checkGameOver(){
+    const blue=grid.filter(h=>h.owner===1).length;
+    const red=grid.filter(h=>h.owner===2).length;
+	
+	if(blue === 0 || red === 0){
+		gameActive = false;
+		const winner = blue===0 ? "红色" : "藍色";
+		const winnercolor = blue===0 ? "#ff5252" : "#00e5ff";
+		
+		statusDiv.innerHTML=`<b style="color:${winnercolor}; font-size:28px;">
+			${winner} 完全佔領勝利！
+		</b><br><button onclick="initGame()">再來一局</button>`;
+		return true;
+	}
+	
+    function hasMove(p){ return grid.some(start=>start.owner===p && grid.some(end=>end.owner===0 && end.type==='normal' && getDistance(start,end)<=2)); }
+    if(!hasMove(1)&&!hasMove(2)){
+        gameActive=false;
+        const winner = blue>red?"藍色":red>blue?"红色":"平局";
+		const winnercolor = blue===0 ? "#ff5252" : "#00e5ff";
+        statusDiv.innerHTML=`<b style="color:${winnercolor}; font-size:28px;">${winner} 勝利！</b><br>
+            <button onclick="initGame()">再來一局</button>`;
+        return true;
     }
-}
-
-// ===== 玩家動作同步 =====
-canvas.onclick=e=>{
-    if(!gameActive) return;
-    const rect=canvas.getBoundingClientRect();
-    const mx=(e.clientX-rect.left)*(canvas.width/rect.width);
-    const my=(e.clientY-rect.top)*(canvas.height/rect.height);
-
-    let h=grid.find(x=>Math.hypot(x.x-mx,x.y-my)<hexSize*0.8);
-    if(!h) return;
-
-    if(h.owner===getPlayer()){
-        selected = selected===h?null:h;
-    } else if(selected && h.owner===0 && h.type==='normal'){
-        if(dist(selected,h)<=2){
-            makeMove(selected,h);
-            selected=null;
-        }
+    if(!hasMove(currentPlayer)){
+        currentPlayer = currentPlayer===1?2:1;
+        updateStatus();
     }
-};
-
-// ===== 將動作寫入 Firebase =====
-function makeMove(a,b){
-    // 儲存動作到 Firebase
-    push(ref(db,"moves"),{
-        from:{q:a.q,r:a.r},
-        to:{q:b.q,r:b.r},
-        player:getPlayer()
-    });
+    return false;
 }
-
-// ===== 監聽 Firebase 動作，更新棋盤 =====
-onValue(ref(db,"moves"), snapshot=>{
-    const data = snapshot.val();
-    if(!data) return;
-    grid.forEach(h=>{ if(h.type!=='spawn' && h.owner>0) h.owner=0; }); // 重置非出生棋子
-    Object.values(data).forEach(m=>{
-        let a = getHex(m.from.q,m.from.r);
-        let b = getHex(m.to.q,m.to.r);
-        if(dist(a,b)===2) a.owner=0;
-        b.owner=m.player;
-        grid.forEach(h=>{
-            if(dist(b,h)===1 && h.owner!==0 && h.owner!==m.player){
-                h.owner=m.player;
-            }
-        });
-    });
-    updateUI();
-});
 
 function draw(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
     grid.forEach(h=>{
-        let color="#3a3a3a";
-        if(h.type==='obstacle') color="#555";
-        else if(h.owner) color=playerColors[h.owner-1];
+        h.scale += (1-h.scale)*0.15;
+        if(h.ripple>0) h.ripple*=0.92;
+        let fill="#3a3a3a";
+        if(h.type==='obstacle') fill="#555555";
+        else if(h.owner===1) fill="#00e5ff";
+        else if(h.owner===2) fill="#ff5252";
+
+        if(selectedHex && h.owner===0 && h.type==='normal'){
+            const d=getDistance(selectedHex,h);
+            if(d===1) fill="rgba(0,255,0,0.3)";
+            if(d===2) fill="rgba(255,255,0,0.3)";
+        }
 
         ctx.beginPath();
         for(let i=0;i<6;i++){
-            let a=Math.PI/3*i;
-            ctx.lineTo(h.x+hexSize*0.9*Math.cos(a),h.y+hexSize*0.9*Math.sin(a));
+            const angle=Math.PI/3*i;
+            ctx.lineTo(h.x + hexSize*0.92*h.scale*Math.cos(angle), h.y + hexSize*0.92*h.scale*Math.sin(angle));
         }
         ctx.closePath();
-        ctx.fillStyle=color;
-        ctx.fill();
+        ctx.fillStyle=fill; ctx.fill();
+        ctx.strokeStyle="#555"; ctx.lineWidth=1; ctx.stroke();
 
-        if(h===selected){
-            ctx.strokeStyle="#fff";
-            ctx.lineWidth=3;
-            ctx.stroke();
+        if(h.ripple>0.05){
+            ctx.beginPath();
+            ctx.arc(h.x,h.y,hexSize*h.ripple,0,Math.PI*2);
+            ctx.strokeStyle=`rgba(255,255,255,${h.ripple})`; ctx.stroke();
         }
+
+        if(h===hoveredHex){ ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke(); }
+        if(h===selectedHex){ ctx.strokeStyle="yellow"; ctx.lineWidth=4; ctx.stroke(); }
     });
     requestAnimationFrame(draw);
 }
 
-function updateUI(){
-    let html="";
-    players.forEach(p=>{
-        let count=grid.filter(h=>h.owner===p).length;
-        html+=`<div style="color:${playerColors[p-1]}">玩家${p}: ${count}</div>`;
-    });
-    status.innerHTML=html+"<br>目前: 玩家"+getPlayer();
-
-    let leg="";
-    players.forEach(p=>{
-        leg+=`<div style="color:${playerColors[p-1]}">■ 玩家${p}</div>`;
-    });
-    legend.innerHTML=leg;
+function move(from,to){
+    saveHistory();
+    const d=getDistance(from,to);
+    if(d===2) from.owner=0;
+    to.owner=currentPlayer;
+    to.scale=0.5;
+    grid.forEach(h=>{ if(getDistance(to,h)===1 && h.owner!==0 && h.owner!==currentPlayer){ h.owner=currentPlayer; h.ripple=1; } });
+    selectedHex=null;
+    if(!checkGameOver()){
+        currentPlayer=currentPlayer===1?2:1;
+        updateStatus();
+        if(aiToggle.checked && currentPlayer===2){ setTimeout(aiMove,300); }
+    }
 }
 
-function saveStateToFirebase(){
-    // 初始化棋盤
-    set(ref(db,"moves"),{});
+canvas.addEventListener('mousemove', e=>{
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left)*(canvas.width/rect.width);
+    const my = (e.clientY - rect.top)*(canvas.height/rect.height);
+    hoveredHex = getNearestHex(mx,my);
+});
+
+canvas.addEventListener('click', e=>{
+    if(!gameActive) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left)*(canvas.width/rect.width);
+    const my = (e.clientY - rect.top)*(canvas.height/rect.height);
+    const clickedHex = getNearestHex(mx,my);
+    if(!clickedHex) return;
+
+    // 只要是玩家自己的棋子，都能選中
+    if(clickedHex.owner===currentPlayer){
+        selectedHex = (selectedHex===clickedHex?null:clickedHex);
+    } 
+    // 目標必須是空白且非障礙物
+    else if(selectedHex && clickedHex.owner===0 && clickedHex.type==='normal'){
+        if(getDistance(selectedHex,clickedHex)<=2) move(selectedHex,clickedHex);
+    }
+});
+
+document.getElementById('undoBtn').onclick = ()=>undoMove();
+resetBtn.onclick = ()=>initGame();
+
+function aiMove(){
+    let moves=[];
+    grid.forEach(a=>{
+        if(a.owner!==2) return;
+        grid.forEach(b=>{
+            if(b.owner===0 && b.type==='normal' && getDistance(a,b)<=2){
+                let score=0;
+                grid.forEach(n=>{ if(getDistance(b,n)===1 && n.owner===1) score++; });
+                moves.push({a,b,score});
+            }
+        });
+    });
+    if(moves.length===0) return;
+    moves.sort((x,y)=>y.score-x.score);
+    const m = moves[0];
+    move(m.a,m.b);
 }
 
-initGameLocal();
+initGame();
 draw();
 </script>
 </body>
