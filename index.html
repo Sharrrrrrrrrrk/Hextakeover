@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>即時聊天室</title>
+</head>
+<body>
+  <h2>多人聊天室</h2>
+
+  <div id="messages" style="height:300px; overflow:auto; border:1px solid #ccc;"></div>
+
+  <input id="name" placeholder="你的名字" />
+  <input id="input" placeholder="輸入訊息..." />
+  <button onclick="send()">送出</button>
+
+  <!-- Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getDatabase, ref, push, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+    // 🔴 換成你的 Firebase 設定
+    const firebaseConfig = {
+      apiKey: "你的KEY",
+      authDomain: "你的ID.firebaseapp.com",
+      databaseURL: "https://你的ID-default-rtdb.firebaseio.com",
+      projectId: "你的ID",
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    const messagesRef = ref(db, "messages");
+
+    // 👀 監聽訊息（重點）
+    onValue(messagesRef, (snapshot) => {
+      const data = snapshot.val();
+      const box = document.getElementById("messages");
+      box.innerHTML = "";
+
+      for (let id in data) {
+        const msg = data[id];
+        box.innerHTML += `<p><b>${msg.name}:</b> ${msg.text}</p>`;
+      }
+    });
+
+    // 📤 傳送訊息
+    window.send = function () {
+      const name = document.getElementById("name").value || "匿名";
+      const text = document.getElementById("input").value;
+
+      if (!text) return;
+
+      push(messagesRef, {
+        name: name,
+        text: text
+      });
+
+      document.getElementById("input").value = "";
+    };
+  </script>
+</body>
+</html>
